@@ -1,0 +1,40 @@
+name: Build Customer Display Launcher (Windows)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'tools/kiosk/windows-customer-display-app/**'
+      - '.github/workflows/build-customer-display-windows.yml'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: tools/kiosk/windows-customer-display-app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build NSIS installer
+        run: npm run dist:win
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: customer-display-launcher-windows
+          path: |
+            tools/kiosk/windows-customer-display-app/dist/*.exe
+            tools/kiosk/windows-customer-display-app/dist/*.blockmap
+            tools/kiosk/windows-customer-display-app/dist/latest*.yml

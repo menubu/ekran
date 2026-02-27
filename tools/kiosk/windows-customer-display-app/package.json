@@ -1,0 +1,52 @@
+{
+  "name": "menubu-customer-display-launcher-windows",
+  "version": "1.0.0",
+  "description": "MenuBu customer display launcher for Windows second screen",
+  "main": "main.js",
+  "author": "MenuBu",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "start:kiosk": "electron . --kiosk",
+    "dist:win": "electron-builder --win nsis --x64",
+    "dist:portable": "electron-builder --win portable --x64"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.menubu.customerdisplay.launcher",
+    "productName": "MenuBu Customer Display Launcher",
+    "artifactName": "MenuBu-Customer-Display-Launcher-${version}-${os}-${arch}.${ext}",
+    "files": [
+      "main.js",
+      "package.json",
+      "README.md"
+    ],
+    "directories": {
+      "buildResources": "build"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "publish": null
+  }
+}
