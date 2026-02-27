@@ -1,7 +1,7 @@
 {
-  "name": "menubu-customer-display-launcher-windows",
+  "name": "menubu-desktop-windows",
   "version": "1.0.0",
-  "description": "MenuBu customer display launcher for Windows second screen",
+  "description": "MenuBu Desktop for Windows panel + customer display flow",
   "main": "main.js",
   "author": "MenuBu",
   "license": "UNLICENSED",
@@ -17,9 +17,9 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.menubu.customerdisplay.launcher",
-    "productName": "MenuBu Customer Display Launcher",
-    "artifactName": "MenuBu-Customer-Display-Launcher-${version}-${os}-${arch}.${ext}",
+    "appId": "com.menubu.desktop",
+    "productName": "MenuBu Desktop",
+    "artifactName": "MenuBu Desktop-${version}-${os}-${arch}.${ext}",
     "files": [
       "main.js",
       "package.json",
@@ -37,6 +37,7 @@
           ]
         }
       ],
+      "executableName": "MenuBu Desktop",
       "icon": "build/icon.ico"
     },
     "nsis": {
@@ -44,6 +45,8 @@
       "perMachine": true,
       "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
+      "shortcutName": "MenuBu Desktop",
+      "uninstallDisplayName": "MenuBu Desktop",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     },

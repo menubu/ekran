@@ -1,11 +1,16 @@
-# MenuBu Windows Customer Display Launcher
+# MenuBu Desktop (Windows)
 
-Bu proje, `order_customer_display.php` sayfasini Windows'ta ikinci ekranda cercevesiz ve tam ekran gorunume yakin kilitli pencere olarak acmak icin hazirlandi.
+Bu proje `MenuBu Desktop` uygulamasidir ve iki pencereli calisir:
+
+- Ana panel: 1. ekranda `https://www.menubu.tr/panel`
+- Musteri ekrani: buton/protocol tetiklemesi ile 2. ekranda `order_customer_display.php`
 
 ## Ozellikler
 
-- Ikinci ekran varsa pencereyi otomatik olarak ikinci ekrana tasir ve boyutunu o ekranla esitler.
-- Pencere `frame: false` oldugu icin cercevesiz acilir.
+- Launcher acildiginda ana panel 1. ekranda acilir.
+- `menubu-display://` tetiklenince musteri ekrani 2. ekranda acilir.
+- Musteri ekrani `frame: false` oldugu icin cercevesizdir.
+- Ikinci ekran varsa musteri penceresi otomatik o ekrana tasinir ve boyutu kilitlenir.
 - Uygulama protokolu destekler: `menubu-display://`
 - Webdeki topbar butonundan local launcher tetiklenebilir.
 - `Ctrl+Shift+Q` ile acil kapanis kisayolu vardir.
@@ -28,13 +33,13 @@ Kiosk mod:
 npm run start:kiosk
 ```
 
-Farkli URL ile:
+Farkli panel URL ile:
 
 ```bash
-npm start -- --url="https://menubu.tr/panel/order_customer_display.php?popup=1&autofs=1"
+npm start -- --panel-url="https://www.menubu.tr/panel"
 ```
 
-veya
+Farkli musteri ekrani URL ile:
 
 ```bash
 MENUBU_CUSTOMER_URL="https://menubu.tr/panel/order_customer_display.php?popup=1&autofs=1" npm start
@@ -74,4 +79,4 @@ Buton:
 
 - Protokol kaydi uygulama ilk calistiginda `setAsDefaultProtocolClient` ile yapilir.
 - Kurulu degilse `menubu-display://` acilmaz; bu durumda web tarafinda fallback akisi ekleyebilirsiniz.
-- Zorlayici kiosk kilidi icin `--hard-lock` parametresi desteklenir.
+- `--kiosk` ve `--hard-lock` modlari musteri ekrani penceresinde kullanilir.
