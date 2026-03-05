@@ -80,3 +80,6 @@ Buton:
 - Protokol kaydi uygulama ilk calistiginda `setAsDefaultProtocolClient` ile yapilir.
 - Kurulu degilse `menubu-display://` acilmaz; bu durumda web tarafinda fallback akisi ekleyebilirsiniz.
 - `--kiosk` ve `--hard-lock` modlari musteri ekrani penceresinde kullanilir.
+- Pavo/local cihaz erisimi icin local network uyumluluk modu varsayilan olarak aciktir.
+  - Kapatmak icin: `MENUBU_ALLOW_LOCAL_NETWORK=0 npm start`
+  - Strict calistirmak icin: `npm start -- --strict-local-network`

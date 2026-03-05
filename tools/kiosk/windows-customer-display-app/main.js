@@ -10,6 +10,13 @@ const DEFAULT_CUSTOMER_URL = 'https://menubu.tr/panel/order_customer_display.php
 
 const KIOSK_MODE = process.argv.includes('--kiosk') || String(process.env.MENUBU_KIOSK || '') === '1';
 const HARD_LOCK_MODE = process.argv.includes('--hard-lock') || String(process.env.MENUBU_HARD_LOCK || '') === '1';
+const LOCAL_NETWORK_COMPAT_MODE = String(process.env.MENUBU_ALLOW_LOCAL_NETWORK || '1') !== '0'
+  && !process.argv.includes('--strict-local-network');
+const LOCAL_NETWORK_DISABLE_FEATURES = [
+  'BlockInsecurePrivateNetworkRequests',
+  'PrivateNetworkAccessSendPreflights',
+  'PrivateNetworkAccessRespectPreflightResults'
+];
 
 let mainWindow = null;
 let customerWindow = null;
@@ -123,6 +130,42 @@ function setSimpleFullscreenIfSupported(win, value) {
   }
 }
 
+function appendFeatureSwitch(switchName, features) {
+  if (!Array.isArray(features) || features.length === 0) return;
+  const existingRaw = String(app.commandLine.getSwitchValue(switchName) || '').trim();
+  const existing = existingRaw === '' ? [] : existingRaw.split(',').map((item) => item.trim()).filter(Boolean);
+  const merged = Array.from(new Set([...existing, ...features]));
+  if (merged.length > 0) {
+    app.commandLine.appendSwitch(switchName, merged.join(','));
+  }
+}
+
+function isPrivateIpv4Host(hostname) {
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(String(hostname || '').trim());
+  if (!match) return false;
+  const parts = match.slice(1).map((part) => Number(part));
+  if (parts.some((part) => !Number.isFinite(part) || part < 0 || part > 255)) return false;
+  if (parts[0] === 10) return true;
+  if (parts[0] === 127) return true;
+  if (parts[0] === 192 && parts[1] === 168) return true;
+  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+  return false;
+}
+
+function isLocalNetworkHost(hostname) {
+  const host = String(hostname || '').trim().toLowerCase();
+  if (!host) return false;
+  if (host === 'localhost' || host === '::1') return true;
+  if (host.endsWith('.local')) return true;
+  return isPrivateIpv4Host(host);
+}
+
+function setupLocalNetworkCompatibility() {
+  if (!LOCAL_NETWORK_COMPAT_MODE) return;
+  appendFeatureSwitch('disable-features', LOCAL_NETWORK_DISABLE_FEATURES);
+  app.commandLine.appendSwitch('allow-insecure-localhost');
+}
+
 function forceCustomerFullscreenState(win) {
   if (!win || win.isDestroyed()) return;
 
@@ -174,6 +217,18 @@ function registerProtocolClient() {
 
 function setupPermissions() {
   session.defaultSession.setPermissionCheckHandler(() => true);
+  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
+    callback(true);
+  });
+  if (LOCAL_NETWORK_COMPAT_MODE) {
+    session.defaultSession.setCertificateVerifyProc((request, callback) => {
+      if (request && isLocalNetworkHost(request.hostname)) {
+        callback(0);
+        return;
+      }
+      callback(-3);
+    });
+  }
 }
 
 function focusMainWindow() {
@@ -326,7 +381,8 @@ function createMainWindow() {
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
-      sandbox: true
+      sandbox: true,
+      allowRunningInsecureContent: LOCAL_NETWORK_COMPAT_MODE
     }
   });
 
@@ -392,6 +448,7 @@ function registerEmergencyShortcuts() {
 
 pendingProtocolTargetUrl = parseProtocolTarget(getProtocolArg(process.argv));
 app.setName(APP_DISPLAY_NAME);
+setupLocalNetworkCompatibility();
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
