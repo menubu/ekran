@@ -26,6 +26,7 @@ const MAIN_ZOOM_DEFAULT = 1;
 let mainWindow = null;
 let customerWindow = null;
 let pendingProtocolTargetUrl = '';
+let mainZoomFactor = MAIN_ZOOM_DEFAULT;
 
 function getArgValue(prefix) {
   const arg = process.argv.find((item) => item.startsWith(prefix));
@@ -59,6 +60,39 @@ function parseProtocolTarget(rawProtocolUrl) {
     return '';
   } catch (_) {
     return '';
+  }
+}
+
+function parseProtocolCommand(rawProtocolUrl) {
+  if (!rawProtocolUrl || typeof rawProtocolUrl !== 'string') return null;
+  try {
+    const parsed = new URL(rawProtocolUrl);
+    if (parsed.protocol !== `${PROTOCOL_NAME}:`) return null;
+
+    const actionRaw = String(
+      parsed.searchParams.get('action')
+      || parsed.searchParams.get('cmd')
+      || parsed.hostname
+      || parsed.pathname
+      || ''
+    ).replace(/^\/+/, '').trim().toLowerCase();
+
+    if (!actionRaw) return null;
+
+    const action = actionRaw.replace(/_/g, '-');
+    if (action === 'zoom-in') return { type: 'zoom', op: 'in' };
+    if (action === 'zoom-out') return { type: 'zoom', op: 'out' };
+    if (action === 'zoom-reset') return { type: 'zoom', op: 'reset' };
+    if (action === 'zoom-set') {
+      const factorRaw = parsed.searchParams.get('factor');
+      const factor = Number(factorRaw);
+      if (!Number.isFinite(factor)) return null;
+      return { type: 'zoom', op: 'set', factor };
+    }
+
+    return null;
+  } catch (_) {
+    return null;
   }
 }
 
@@ -181,6 +215,42 @@ function setupLocalNetworkCompatibility() {
   appendFeatureSwitch('disable-features', LOCAL_NETWORK_DISABLE_FEATURES);
   app.commandLine.appendSwitch('allow-insecure-localhost');
   app.commandLine.appendSwitch('ignore-certificate-errors');
+}
+
+function clampMainZoomFactor(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return MAIN_ZOOM_DEFAULT;
+  return Math.max(MAIN_ZOOM_MIN, Math.min(MAIN_ZOOM_MAX, numeric));
+}
+
+function applyMainZoomFactor(value) {
+  mainZoomFactor = clampMainZoomFactor(value);
+  if (!mainWindow || mainWindow.isDestroyed()) return mainZoomFactor;
+  try {
+    mainWindow.webContents.setZoomFactor(mainZoomFactor);
+  } catch (_) {
+    // no-op
+  }
+  return mainZoomFactor;
+}
+
+function handleMainZoomCommand(command) {
+  if (!command || command.type !== 'zoom') return;
+  if (command.op === 'in') {
+    applyMainZoomFactor(mainZoomFactor + MAIN_ZOOM_STEP);
+    return;
+  }
+  if (command.op === 'out') {
+    applyMainZoomFactor(mainZoomFactor - MAIN_ZOOM_STEP);
+    return;
+  }
+  if (command.op === 'reset') {
+    applyMainZoomFactor(MAIN_ZOOM_DEFAULT);
+    return;
+  }
+  if (command.op === 'set') {
+    applyMainZoomFactor(command.factor);
+  }
 }
 
 function forceCustomerFullscreenState(win) {
@@ -380,6 +450,12 @@ function openCustomerDisplayWindow(targetUrl = '') {
 }
 
 function handleProtocolInvocation(rawProtocolUrl) {
+  const protocolCommand = parseProtocolCommand(rawProtocolUrl);
+  if (protocolCommand) {
+    handleMainZoomCommand(protocolCommand);
+    return;
+  }
+
   const nextUrl = parseProtocolTarget(rawProtocolUrl);
   if (!isHttpUrl(nextUrl)) return;
   pendingProtocolTargetUrl = nextUrl;
@@ -401,7 +477,8 @@ function injectMainZoomControls(win) {
       const MIN = ${MAIN_ZOOM_MIN};
       const MAX = ${MAIN_ZOOM_MAX};
       const STEP = ${MAIN_ZOOM_STEP};
-      const DEFAULT_ZOOM = ${MAIN_ZOOM_DEFAULT};
+      const DEFAULT_ZOOM = ${mainZoomFactor};
+      const COMMAND_BASE = '${PROTOCOL_NAME}://control';
 
       const clamp = (value) => {
         const n = Number(value);
@@ -422,10 +499,17 @@ function injectMainZoomControls(win) {
           // no-op
         }
       };
-      const applyZoom = (value) => {
-        const factor = clamp(value);
-        document.documentElement.style.zoom = String(factor);
-        return factor;
+      const sendProtocolCommand = (action, extra = '') => {
+        const url = COMMAND_BASE + '?action=' + encodeURIComponent(action) + (extra || '');
+        try {
+          window.open(url, '_blank', 'noopener');
+        } catch (_) {
+          try {
+            window.location.assign(url);
+          } catch (_) {
+            // no-op
+          }
+        }
       };
 
       const root = document.createElement('div');
@@ -434,68 +518,92 @@ function injectMainZoomControls(win) {
       root.style.right = '12px';
       root.style.bottom = '12px';
       root.style.zIndex = '2147483647';
-      root.style.display = 'flex';
-      root.style.gap = '6px';
-      root.style.padding = '8px';
-      root.style.borderRadius = '10px';
-      root.style.background = 'rgba(15,23,42,0.75)';
-      root.style.backdropFilter = 'blur(4px)';
       root.style.fontFamily = 'system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
-      root.style.alignItems = 'center';
+      root.style.display = 'flex';
+      root.style.flexDirection = 'column';
+      root.style.alignItems = 'flex-end';
+      root.style.gap = '8px';
 
-      const makeBtn = (label, title) => {
+      const makeBtn = (label, title, options = {}) => {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.textContent = label;
         btn.title = title;
         btn.style.border = 'none';
-        btn.style.borderRadius = '8px';
-        btn.style.padding = '6px 10px';
-        btn.style.fontSize = '14px';
+        btn.style.borderRadius = options.round ? '999px' : '10px';
+        btn.style.padding = options.compact ? '0' : '8px 12px';
         btn.style.fontWeight = '700';
         btn.style.cursor = 'pointer';
-        btn.style.background = '#e2e8f0';
-        btn.style.color = '#0f172a';
+        btn.style.background = options.dark ? 'rgba(15,23,42,0.95)' : '#1f2937';
+        btn.style.color = '#f8fafc';
+        btn.style.width = options.square ? '40px' : 'auto';
+        btn.style.height = options.square ? '40px' : 'auto';
+        btn.style.fontSize = options.square ? '16px' : '14px';
+        btn.style.display = 'inline-flex';
+        btn.style.alignItems = 'center';
+        btn.style.justifyContent = 'center';
+        btn.style.boxShadow = '0 8px 20px rgba(2,6,23,0.35)';
         return btn;
       };
 
+      const toggleBtn = makeBtn('', 'Yakınlaştır', { round: true, square: true, compact: true, dark: true });
+      toggleBtn.setAttribute('aria-label', 'Yakınlaştır');
+      toggleBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#f8fafc" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>';
+
+      const panel = document.createElement('div');
+      panel.style.display = 'none';
+      panel.style.alignItems = 'center';
+      panel.style.gap = '8px';
+      panel.style.padding = '8px 10px';
+      panel.style.borderRadius = '14px';
+      panel.style.background = 'rgba(15,23,42,0.95)';
+      panel.style.boxShadow = '0 14px 28px rgba(2,6,23,0.45)';
+
+      const zoomOutBtn = makeBtn('-', 'Uzaklaştır', { round: true, square: true, compact: true, dark: true });
+      const zoomInBtn = makeBtn('+', 'Yakınlaştır', { round: true, square: true, compact: true, dark: true });
+      const resetBtn = makeBtn('100%', 'Yakınlaştırmayı sıfırla', { dark: true });
+      resetBtn.style.minWidth = '62px';
+
       const zoomText = document.createElement('span');
-      zoomText.style.minWidth = '52px';
+      zoomText.style.minWidth = '56px';
       zoomText.style.textAlign = 'center';
-      zoomText.style.color = '#ffffff';
-      zoomText.style.fontSize = '12px';
+      zoomText.style.color = '#f8fafc';
+      zoomText.style.fontSize = '13px';
       zoomText.style.fontWeight = '700';
 
-      const zoomOutBtn = makeBtn('−', 'Uzaklaştır');
-      const resetBtn = makeBtn('100%', 'Yakınlaştırmayı sıfırla');
-      const zoomInBtn = makeBtn('+', 'Yakınlaştır');
-
-      let currentZoom = applyZoom(safeReadZoom());
+      let currentZoom = safeReadZoom();
       const renderZoom = () => {
         zoomText.textContent = Math.round(currentZoom * 100) + '%';
       };
       renderZoom();
 
-      zoomOutBtn.addEventListener('click', () => {
-        currentZoom = applyZoom(currentZoom - STEP);
+      const setZoom = (nextValue) => {
+        currentZoom = clamp(nextValue);
         safeWriteZoom(currentZoom);
         renderZoom();
+        sendProtocolCommand('zoom-set', '&factor=' + encodeURIComponent(String(currentZoom)));
+      };
+
+      zoomOutBtn.addEventListener('click', () => {
+        setZoom(currentZoom - STEP);
       });
       resetBtn.addEventListener('click', () => {
-        currentZoom = applyZoom(DEFAULT_ZOOM);
-        safeWriteZoom(currentZoom);
-        renderZoom();
+        setZoom(1);
       });
       zoomInBtn.addEventListener('click', () => {
-        currentZoom = applyZoom(currentZoom + STEP);
-        safeWriteZoom(currentZoom);
-        renderZoom();
+        setZoom(currentZoom + STEP);
       });
 
-      root.appendChild(zoomOutBtn);
-      root.appendChild(resetBtn);
-      root.appendChild(zoomInBtn);
-      root.appendChild(zoomText);
+      toggleBtn.addEventListener('click', () => {
+        panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+      });
+
+      panel.appendChild(zoomOutBtn);
+      panel.appendChild(zoomText);
+      panel.appendChild(zoomInBtn);
+      panel.appendChild(resetBtn);
+      root.appendChild(panel);
+      root.appendChild(toggleBtn);
       document.body.appendChild(root);
     })();
   `).catch(() => {
@@ -528,6 +636,7 @@ function createMainWindow() {
       webSecurity: !LOCAL_NETWORK_COMPAT_MODE
     }
   });
+  applyMainZoomFactor(mainZoomFactor);
 
   mainWindow.setTitle(APP_DISPLAY_NAME);
   mainWindow.on('page-title-updated', (event) => {
@@ -546,6 +655,7 @@ function createMainWindow() {
   });
 
   mainWindow.webContents.on('did-finish-load', () => {
+    applyMainZoomFactor(mainZoomFactor);
     injectMainZoomControls(mainWindow);
   });
 
