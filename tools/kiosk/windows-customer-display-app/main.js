@@ -17,6 +17,11 @@ const LOCAL_NETWORK_DISABLE_FEATURES = [
   'PrivateNetworkAccessSendPreflights',
   'PrivateNetworkAccessRespectPreflightResults'
 ];
+const MAIN_ZOOM_STORAGE_KEY = 'menubu_desktop_main_zoom_factor';
+const MAIN_ZOOM_MIN = 0.7;
+const MAIN_ZOOM_MAX = 1.6;
+const MAIN_ZOOM_STEP = 0.1;
+const MAIN_ZOOM_DEFAULT = 1;
 
 let mainWindow = null;
 let customerWindow = null;
@@ -160,10 +165,22 @@ function isLocalNetworkHost(hostname) {
   return isPrivateIpv4Host(host);
 }
 
+function isLocalNetworkUrl(rawUrl) {
+  try {
+    const parsed = new URL(String(rawUrl || ''));
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+      ? isLocalNetworkHost(parsed.hostname)
+      : false;
+  } catch (_) {
+    return false;
+  }
+}
+
 function setupLocalNetworkCompatibility() {
   if (!LOCAL_NETWORK_COMPAT_MODE) return;
   appendFeatureSwitch('disable-features', LOCAL_NETWORK_DISABLE_FEATURES);
   app.commandLine.appendSwitch('allow-insecure-localhost');
+  app.commandLine.appendSwitch('ignore-certificate-errors');
 }
 
 function forceCustomerFullscreenState(win) {
@@ -227,6 +244,19 @@ function setupPermissions() {
         return;
       }
       callback(-3);
+    });
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      if (!isLocalNetworkUrl(details.url)) {
+        callback({});
+        return;
+      }
+      const headers = { ...(details.responseHeaders || {}) };
+      headers['Access-Control-Allow-Origin'] = ['*'];
+      headers['Access-Control-Allow-Methods'] = ['GET, POST, PUT, PATCH, DELETE, OPTIONS'];
+      headers['Access-Control-Allow-Headers'] = ['*'];
+      headers['Access-Control-Allow-Credentials'] = ['true'];
+      headers['Access-Control-Allow-Private-Network'] = ['true'];
+      callback({ responseHeaders: headers });
     });
   }
 }
@@ -351,14 +381,126 @@ function openCustomerDisplayWindow(targetUrl = '') {
 
 function handleProtocolInvocation(rawProtocolUrl) {
   const nextUrl = parseProtocolTarget(rawProtocolUrl);
-  if (isHttpUrl(nextUrl)) {
-    pendingProtocolTargetUrl = nextUrl;
-  }
+  if (!isHttpUrl(nextUrl)) return;
+  pendingProtocolTargetUrl = nextUrl;
 
   if (app.isReady()) {
     openCustomerDisplayWindow(nextUrl);
     focusMainWindow();
   }
+}
+
+function injectMainZoomControls(win) {
+  if (!win || win.isDestroyed()) return;
+  win.webContents.executeJavaScript(`
+    (() => {
+      const ROOT_ID = 'menubuDesktopZoomTools';
+      if (document.getElementById(ROOT_ID)) return;
+
+      const STORAGE_KEY = ${JSON.stringify(MAIN_ZOOM_STORAGE_KEY)};
+      const MIN = ${MAIN_ZOOM_MIN};
+      const MAX = ${MAIN_ZOOM_MAX};
+      const STEP = ${MAIN_ZOOM_STEP};
+      const DEFAULT_ZOOM = ${MAIN_ZOOM_DEFAULT};
+
+      const clamp = (value) => {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return DEFAULT_ZOOM;
+        return Math.max(MIN, Math.min(MAX, n));
+      };
+      const safeReadZoom = () => {
+        try {
+          return clamp(localStorage.getItem(STORAGE_KEY));
+        } catch (_) {
+          return DEFAULT_ZOOM;
+        }
+      };
+      const safeWriteZoom = (value) => {
+        try {
+          localStorage.setItem(STORAGE_KEY, String(value));
+        } catch (_) {
+          // no-op
+        }
+      };
+      const applyZoom = (value) => {
+        const factor = clamp(value);
+        document.documentElement.style.zoom = String(factor);
+        return factor;
+      };
+
+      const root = document.createElement('div');
+      root.id = ROOT_ID;
+      root.style.position = 'fixed';
+      root.style.right = '12px';
+      root.style.bottom = '12px';
+      root.style.zIndex = '2147483647';
+      root.style.display = 'flex';
+      root.style.gap = '6px';
+      root.style.padding = '8px';
+      root.style.borderRadius = '10px';
+      root.style.background = 'rgba(15,23,42,0.75)';
+      root.style.backdropFilter = 'blur(4px)';
+      root.style.fontFamily = 'system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+      root.style.alignItems = 'center';
+
+      const makeBtn = (label, title) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = label;
+        btn.title = title;
+        btn.style.border = 'none';
+        btn.style.borderRadius = '8px';
+        btn.style.padding = '6px 10px';
+        btn.style.fontSize = '14px';
+        btn.style.fontWeight = '700';
+        btn.style.cursor = 'pointer';
+        btn.style.background = '#e2e8f0';
+        btn.style.color = '#0f172a';
+        return btn;
+      };
+
+      const zoomText = document.createElement('span');
+      zoomText.style.minWidth = '52px';
+      zoomText.style.textAlign = 'center';
+      zoomText.style.color = '#ffffff';
+      zoomText.style.fontSize = '12px';
+      zoomText.style.fontWeight = '700';
+
+      const zoomOutBtn = makeBtn('−', 'Uzaklaştır');
+      const resetBtn = makeBtn('100%', 'Yakınlaştırmayı sıfırla');
+      const zoomInBtn = makeBtn('+', 'Yakınlaştır');
+
+      let currentZoom = applyZoom(safeReadZoom());
+      const renderZoom = () => {
+        zoomText.textContent = Math.round(currentZoom * 100) + '%';
+      };
+      renderZoom();
+
+      zoomOutBtn.addEventListener('click', () => {
+        currentZoom = applyZoom(currentZoom - STEP);
+        safeWriteZoom(currentZoom);
+        renderZoom();
+      });
+      resetBtn.addEventListener('click', () => {
+        currentZoom = applyZoom(DEFAULT_ZOOM);
+        safeWriteZoom(currentZoom);
+        renderZoom();
+      });
+      zoomInBtn.addEventListener('click', () => {
+        currentZoom = applyZoom(currentZoom + STEP);
+        safeWriteZoom(currentZoom);
+        renderZoom();
+      });
+
+      root.appendChild(zoomOutBtn);
+      root.appendChild(resetBtn);
+      root.appendChild(zoomInBtn);
+      root.appendChild(zoomText);
+      document.body.appendChild(root);
+    })();
+  `).catch(() => {
+    // no-op
+  });
 }
 
 function createMainWindow() {
@@ -382,7 +524,8 @@ function createMainWindow() {
     webPreferences: {
       contextIsolation: true,
       sandbox: true,
-      allowRunningInsecureContent: LOCAL_NETWORK_COMPAT_MODE
+      allowRunningInsecureContent: LOCAL_NETWORK_COMPAT_MODE,
+      webSecurity: !LOCAL_NETWORK_COMPAT_MODE
     }
   });
 
@@ -400,6 +543,10 @@ function createMainWindow() {
       mainWindow.maximize();
     }
     mainWindow.focus();
+  });
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    injectMainZoomControls(mainWindow);
   });
 
   mainWindow.on('closed', () => {
@@ -489,6 +636,7 @@ if (!hasSingleInstanceLock) {
 
     if (isHttpUrl(pendingProtocolTargetUrl)) {
       openCustomerDisplayWindow(pendingProtocolTargetUrl);
+      focusMainWindow();
     }
 
     app.on('activate', () => {
